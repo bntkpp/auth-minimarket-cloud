@@ -1,0 +1,33 @@
+{
+  "name": "auth-minimarket-cloud",
+  "version": "1.2.0",
+  "description": "Mock del contrato REST del servicio de Identidad, Usuarios y Sesiones (Grupo 2) - Minimarketplace",
+  "type": "module",
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "keywords": [
+    "auth",
+    "identity",
+    "mock",
+    "openapi",
+    "supabase",
+    "minimarketplace"
+  ],
+  "author": "Grupo 2 - Identidad, Usuarios y Sesiones",
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2"
+  },
+  "optionalDependencies": {
+    "@supabase/supabase-js": "^2.45.0"
+  }
+}
