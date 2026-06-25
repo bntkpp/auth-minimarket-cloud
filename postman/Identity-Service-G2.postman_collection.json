@@ -1,0 +1,576 @@
+{
+  "info": {
+    "name": "Identity Service API (G2) - Mock",
+    "_postman_id": "g2-identity-service-mock-0001",
+    "description": "Colección de pruebas de contrato para el servicio de Identidad, Usuarios y Sesiones (Grupo 2). Las pruebas validan códigos de estado, esquema de respuesta y encadenan tokens automáticamente. Importa también el environment `Identity-Service-G2.postman_environment.json` o usa la variable de colección `base_url`.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:8080" },
+    { "key": "access_token", "value": "" },
+    { "key": "refresh_token", "value": "" },
+    { "key": "admin_access_token", "value": "" },
+    { "key": "reg_email", "value": "" },
+    { "key": "new_user_id", "value": "" },
+    { "key": "customer_user_id", "value": "3d9a1f44-1b2a-4c3d-8e5f-aabbccddeeff" },
+    { "key": "reset_token", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Register (201)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('reg_email', `test_${Date.now()}@correo.cl`);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 201', () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.test('devuelve user + tokens', () => {",
+                  "  pm.expect(b).to.have.property('access_token');",
+                  "  pm.expect(b).to.have.property('refresh_token');",
+                  "  pm.expect(b.token_type).to.eql('bearer');",
+                  "  pm.expect(b.user).to.have.property('user_id');",
+                  "  pm.expect(b.user).to.have.property('business_user_id');",
+                  "  pm.expect(b.user.role).to.eql('customer');",
+                  "  pm.expect(b.user.status).to.eql('active');",
+                  "});",
+                  "pm.collectionVariables.set('access_token', b.access_token);",
+                  "pm.collectionVariables.set('refresh_token', b.refresh_token);",
+                  "pm.collectionVariables.set('new_user_id', b.user.user_id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/auth/register", "host": ["{{base_url}}"], "path": ["auth", "register"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{reg_email}}\",\n  \"password\": \"MiClave123\",\n  \"full_name\": \"Usuario de Prueba\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Register email duplicado (409)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 409', () => pm.response.to.have.status(409));",
+                  "pm.test('code EMAIL_ALREADY_EXISTS', () => pm.expect(pm.response.json().code).to.eql('EMAIL_ALREADY_EXISTS'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/auth/register", "host": ["{{base_url}}"], "path": ["auth", "register"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"juan@correo.cl\",\n  \"password\": \"MiClave123\",\n  \"full_name\": \"Juan Duplicado\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Register password debil (422)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 422', () => pm.response.to.have.status(422));",
+                  "pm.test('code WEAK_PASSWORD', () => pm.expect(pm.response.json().code).to.eql('WEAK_PASSWORD'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/auth/register", "host": ["{{base_url}}"], "path": ["auth", "register"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"corta@correo.cl\",\n  \"password\": \"123\",\n  \"full_name\": \"Clave Corta\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Login customer (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('access_token', b.access_token);",
+                  "pm.collectionVariables.set('refresh_token', b.refresh_token);",
+                  "pm.test('business_user_id presente', () => pm.expect(b.user.business_user_id).to.be.a('string'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/auth/login", "host": ["{{base_url}}"], "path": ["auth", "login"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"juan@correo.cl\",\n  \"password\": \"MiClave123\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Login admin (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('admin_access_token', b.access_token);",
+                  "pm.test('rol admin', () => pm.expect(b.user.role).to.eql('admin'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/auth/login", "host": ["{{base_url}}"], "path": ["auth", "login"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"maria@correo.cl\",\n  \"password\": \"AdminClave123\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Login credenciales incorrectas (401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 401', () => pm.response.to.have.status(401));",
+                  "pm.test('code INVALID_CREDENTIALS', () => pm.expect(pm.response.json().code).to.eql('INVALID_CREDENTIALS'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/auth/login", "host": ["{{base_url}}"], "path": ["auth", "login"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"juan@correo.cl\",\n  \"password\": \"claveIncorrecta\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Validate sesion (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('valid=true e identidad', () => {",
+                  "  pm.expect(b.valid).to.eql(true);",
+                  "  pm.expect(b).to.have.property('user_id');",
+                  "  pm.expect(b).to.have.property('business_user_id');",
+                  "  pm.expect(b).to.have.property('expires_at');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" },
+              { "key": "X-Consumer", "value": "order-service" }
+            ],
+            "url": { "raw": "{{base_url}}/auth/validate", "host": ["{{base_url}}"], "path": ["auth", "validate"] }
+          }
+        },
+        {
+          "name": "Validate sin token (401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 401', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/auth/validate", "host": ["{{base_url}}"], "path": ["auth", "validate"] }
+          }
+        },
+        {
+          "name": "Refresh token (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('nuevo access_token', () => pm.expect(b.access_token).to.be.a('string'));",
+                  "pm.collectionVariables.set('access_token', b.access_token);",
+                  "pm.collectionVariables.set('refresh_token', b.refresh_token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/auth/refresh", "host": ["{{base_url}}"], "path": ["auth", "refresh"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Forgot password (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "// El mock devuelve el token de recuperacion en un header (solo fuera de prod).",
+                  "const t = pm.response.headers.get('X-Mock-Reset-Token');",
+                  "if (t) pm.collectionVariables.set('reset_token', t);",
+                  "pm.test('mensaje generico', () => pm.expect(pm.response.json()).to.have.property('message'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/auth/forgot-password", "host": ["{{base_url}}"], "path": ["auth", "forgot-password"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"juan@correo.cl\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Reset password (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "// Nota: tras este reset, la password de juan queda 'MiClaveNueva123'."
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/auth/reset-password", "host": ["{{base_url}}"], "path": ["auth", "reset-password"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reset_token\": \"{{reset_token}}\",\n  \"new_password\": \"MiClaveNueva123\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Logout (204)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": { "raw": "{{base_url}}/auth/logout", "host": ["{{base_url}}"], "path": ["auth", "logout"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Users",
+      "item": [
+        {
+          "name": "Get my profile (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('es mi perfil', () => pm.expect(pm.response.json()).to.have.property('email'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": { "raw": "{{base_url}}/users/me", "host": ["{{base_url}}"], "path": ["users", "me"] }
+          }
+        },
+        {
+          "name": "Update my profile (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('nombre actualizado', () => pm.expect(pm.response.json().full_name).to.eql('Juan A. Perez'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": { "raw": "{{base_url}}/users/me", "host": ["{{base_url}}"], "path": ["users", "me"] },
+            "body": { "mode": "raw", "raw": "{\n  \"full_name\": \"Juan A. Perez\"\n}" }
+          }
+        },
+        {
+          "name": "List users como admin (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('paginacion presente', () => {",
+                  "  pm.expect(b).to.have.property('total');",
+                  "  pm.expect(b).to.have.property('page');",
+                  "  pm.expect(b).to.have.property('limit');",
+                  "  pm.expect(b.users).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{admin_access_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/users?page=1&limit=20",
+              "host": ["{{base_url}}"],
+              "path": ["users"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "List users como customer (403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 403', () => pm.response.to.have.status(403));",
+                  "pm.test('code FORBIDDEN', () => pm.expect(pm.response.json().code).to.eql('FORBIDDEN'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": { "raw": "{{base_url}}/users", "host": ["{{base_url}}"], "path": ["users"] }
+          }
+        },
+        {
+          "name": "Get user by id como admin (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{admin_access_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/users/{{customer_user_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["users", "{{customer_user_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Get user inexistente (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 404', () => pm.response.to.have.status(404));",
+                  "pm.test('code NOT_FOUND', () => pm.expect(pm.response.json().code).to.eql('NOT_FOUND'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{admin_access_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/users/00000000-0000-0000-0000-000000000000",
+              "host": ["{{base_url}}"],
+              "path": ["users", "00000000-0000-0000-0000-000000000000"]
+            }
+          }
+        },
+        {
+          "name": "Change role como admin (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('rol = admin', () => pm.expect(pm.response.json().role).to.eql('admin'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{admin_access_token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/users/{{new_user_id}}/role",
+              "host": ["{{base_url}}"],
+              "path": ["users", "{{new_user_id}}", "role"]
+            },
+            "body": { "mode": "raw", "raw": "{\n  \"role\": \"admin\"\n}" }
+          }
+        },
+        {
+          "name": "Change status disabled como admin (200)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('status = disabled', () => pm.expect(pm.response.json().status).to.eql('disabled'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{admin_access_token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/users/{{new_user_id}}/status",
+              "host": ["{{base_url}}"],
+              "path": ["users", "{{new_user_id}}", "status"]
+            },
+            "body": { "mode": "raw", "raw": "{\n  \"status\": \"disabled\"\n}" }
+          }
+        },
+        {
+          "name": "Delete user como admin (204)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{admin_access_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/users/{{new_user_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["users", "{{new_user_id}}"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
