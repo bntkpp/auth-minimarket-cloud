@@ -7,10 +7,26 @@ import crypto from 'node:crypto';
  * (ahí Supabase Auth se encarga del hashing).
  */
 
-const ahora = () => new Date().toISOString();
+export type Role = 'customer' | 'admin';
+export type Status = 'active' | 'disabled';
+
+export interface Usuario {
+  user_id: string;
+  business_user_id: string;
+  email: string;
+  full_name: string;
+  role: Role;
+  status: Status;
+  email_verified: boolean;
+  password: string;
+  created_at: string;
+  updated_at: string;
+}
+
+const ahora = (): string => new Date().toISOString();
 
 // --- Datos en memoria -------------------------------------------------------
-export const usuarios = [
+export const usuarios: Usuario[] = [
   {
     user_id: '3d9a1f44-1b2a-4c3d-8e5f-aabbccddeeff',
     business_user_id: 'USR-01',
@@ -37,23 +53,29 @@ export const usuarios = [
   },
 ];
 
-const refreshTokens = new Map(); // refresh_token -> user_id
-const resetTokens = new Map();   // reset_token   -> user_id
-let businessSeq = 2;             // ya van USR-01 y USR-02
+const refreshTokens = new Map<string, string>(); // refresh_token -> user_id
+const resetTokens = new Map<string, string>();   // reset_token   -> user_id
+let businessSeq = 2;                              // ya van USR-01 y USR-02
 
 // --- Usuarios ---------------------------------------------------------------
-export function buscarPorEmail(email) {
+export function buscarPorEmail(email: string): Usuario | null {
   const e = String(email || '').toLowerCase();
-  return usuarios.find((u) => u.email.toLowerCase() === e) || null;
+  return usuarios.find((u) => u.email.toLowerCase() === e) ?? null;
 }
 
-export function buscarPorId(userId) {
-  return usuarios.find((u) => u.user_id === userId) || null;
+export function buscarPorId(userId: string): Usuario | null {
+  return usuarios.find((u) => u.user_id === userId) ?? null;
 }
 
-export function crearUsuario({ email, password, full_name }) {
+export interface NuevoUsuario {
+  email: string;
+  password: string;
+  full_name: string;
+}
+
+export function crearUsuario({ email, password, full_name }: NuevoUsuario): Usuario {
   businessSeq += 1;
-  const u = {
+  const u: Usuario = {
     user_id: crypto.randomUUID(),
     business_user_id: `USR-${String(businessSeq).padStart(2, '0')}`,
     email,
@@ -69,12 +91,12 @@ export function crearUsuario({ email, password, full_name }) {
   return u;
 }
 
-export function actualizarUsuario(usuario, cambios) {
+export function actualizarUsuario(usuario: Usuario, cambios: Partial<Usuario>): Usuario {
   Object.assign(usuario, cambios, { updated_at: ahora() });
   return usuario;
 }
 
-export function eliminarUsuario(userId) {
+export function eliminarUsuario(userId: string): boolean {
   const i = usuarios.findIndex((u) => u.user_id === userId);
   if (i === -1) return false;
   usuarios.splice(i, 1);
@@ -82,37 +104,37 @@ export function eliminarUsuario(userId) {
 }
 
 // --- Sesiones (refresh tokens) ---------------------------------------------
-export function crearRefreshToken(userId) {
+export function crearRefreshToken(userId: string): string {
   const token = 'mock_' + crypto.randomBytes(16).toString('hex');
   refreshTokens.set(token, userId);
   return token;
 }
 
-export function usarRefreshToken(token) {
+export function usarRefreshToken(token: string): string | null {
   const userId = refreshTokens.get(token);
   if (!userId) return null;
   refreshTokens.delete(token); // rotación: el viejo deja de servir
   return userId;
 }
 
-export function revocarRefreshToken(token) {
+export function revocarRefreshToken(token: string): void {
   refreshTokens.delete(token);
 }
 
-export function revocarSesiones(userId) {
+export function revocarSesiones(userId: string): void {
   for (const [t, uid] of refreshTokens.entries()) {
     if (uid === userId) refreshTokens.delete(t);
   }
 }
 
 // --- Tokens de recuperación de contraseña ----------------------------------
-export function crearResetToken(userId) {
+export function crearResetToken(userId: string): string {
   const token = 'rt_' + crypto.randomBytes(12).toString('hex');
   resetTokens.set(token, userId);
   return token;
 }
 
-export function usarResetToken(token) {
+export function usarResetToken(token: string): string | null {
   const userId = resetTokens.get(token);
   if (!userId) return null;
   resetTokens.delete(token);

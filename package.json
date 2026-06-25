@@ -3,13 +3,15 @@
   "version": "1.2.0",
   "description": "Mock del contrato REST del servicio de Identidad, Usuarios y Sesiones (Grupo 2) - Minimarketplace",
   "type": "module",
-  "main": "src/server.js",
+  "main": "dist/server.js",
   "engines": {
     "node": ">=18"
   },
   "scripts": {
-    "start": "node src/server.js",
-    "dev": "node --watch src/server.js"
+    "start": "tsx src/server.ts",
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
   },
   "keywords": [
     "auth",
@@ -17,6 +19,7 @@
     "mock",
     "openapi",
     "supabase",
+    "typescript",
     "minimarketplace"
   ],
   "author": "Grupo 2 - Identidad, Usuarios y Sesiones",
@@ -25,9 +28,14 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
-    "jsonwebtoken": "^9.0.2"
+    "jsonwebtoken": "^9.0.2",
+    "tsx": "^4.19.2"
   },
-  "optionalDependencies": {
-    "@supabase/supabase-js": "^2.45.0"
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "@types/node": "^22.7.5",
+    "@types/express": "^4.17.21",
+    "@types/cors": "^2.8.17",
+    "@types/jsonwebtoken": "^9.0.7"
   }
 }

@@ -1,5 +1,7 @@
 import jwt from 'jsonwebtoken';
-import { buscarPorId } from './store.js';
+import type { Request, Response, NextFunction } from 'express';
+import { buscarPorId, type Usuario } from './store.js';
+import './types.js'; // carga la extensión de tipos de Express.Request
 
 /**
  * Utilidades comunes: configuración, errores con el formato del contrato,
@@ -20,7 +22,10 @@ export const config = {
 // --- Errores con el formato unificado del ecosistema ------------------------
 // { timestamp, status, code, message, correlationId }
 export class ApiError extends Error {
-  constructor(status, code, message) {
+  status: number;
+  code: string;
+
+  constructor(status: number, code: string, message: string) {
     super(message);
     this.status = status;
     this.code = code;
@@ -40,7 +45,7 @@ export const fallo = {
 };
 
 // Middleware final que convierte cualquier error al formato del contrato.
-export function manejadorErrores(err, req, res, _next) {
+export function manejadorErrores(err: unknown, req: Request, res: Response, _next: NextFunction): void {
   const e = err instanceof ApiError ? err : new ApiError(500, 'INTERNAL_ERROR', 'Ocurrió un error inesperado.');
   if (!(err instanceof ApiError)) console.error(err);
   res.status(e.status).json({
@@ -48,12 +53,12 @@ export function manejadorErrores(err, req, res, _next) {
     status: e.status,
     code: e.code,
     message: e.message,
-    correlationId: req.correlationId || null,
+    correlationId: req.correlationId ?? null,
   });
 }
 
 // --- Tokens (JWT) -----------------------------------------------------------
-export function emitirToken(usuario) {
+export function emitirToken(usuario: Usuario): string {
   return jwt.sign(
     {
       sub: usuario.user_id,
@@ -69,19 +74,19 @@ export function emitirToken(usuario) {
 
 // --- Middlewares de autenticación ------------------------------------------
 // Verifica el header "Authorization: Bearer <token>" y deja el usuario en req.
-export function autenticar(req, _res, next) {
+export function autenticar(req: Request, _res: Response, next: NextFunction): void {
   const [scheme, token] = (req.headers.authorization || '').split(' ');
   if (scheme !== 'Bearer' || !token) {
     return next(fallo.unauthorized('Falta el token (Bearer).'));
   }
-  let datos;
+  let datos: jwt.JwtPayload;
   try {
-    datos = jwt.verify(token, config.jwtSecret);
+    datos = jwt.verify(token, config.jwtSecret) as jwt.JwtPayload;
   } catch (e) {
-    const msg = e.name === 'TokenExpiredError' ? 'El token ha expirado.' : 'Token inválido.';
+    const msg = (e as Error).name === 'TokenExpiredError' ? 'El token ha expirado.' : 'Token inválido.';
     return next(fallo.unauthorized(msg));
   }
-  const usuario = buscarPorId(datos.sub);
+  const usuario = buscarPorId(String(datos.sub));
   if (!usuario) return next(fallo.unauthorized('El usuario ya no existe.'));
   req.usuario = usuario;
   req.token = token;
@@ -89,19 +94,31 @@ export function autenticar(req, _res, next) {
 }
 
 // Bloquea si la cuenta está deshabilitada (403).
-export function soloActivos(req, _res, next) {
-  if (req.usuario.status !== 'active') return next(fallo.forbidden('La cuenta está deshabilitada.'));
+export function soloActivos(req: Request, _res: Response, next: NextFunction): void {
+  if (req.usuario!.status !== 'active') return next(fallo.forbidden('La cuenta está deshabilitada.'));
   next();
 }
 
 // Bloquea si no es admin (403).
-export function soloAdmin(req, _res, next) {
-  if (req.usuario.role !== 'admin') return next(fallo.forbidden('Se requiere rol admin.'));
+export function soloAdmin(req: Request, _res: Response, next: NextFunction): void {
+  if (req.usuario!.role !== 'admin') return next(fallo.forbidden('Se requiere rol admin.'));
   next();
 }
 
 // --- Salida: arma el objeto UserProfile del contrato (sin la contraseña) ----
-export function aPerfil(u) {
+export interface UserProfile {
+  user_id: string;
+  business_user_id: string | null;
+  email: string;
+  full_name: string;
+  role: Usuario['role'];
+  status: Usuario['status'];
+  email_verified: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export function aPerfil(u: Usuario): UserProfile {
   return {
     user_id: u.user_id,
     business_user_id: u.business_user_id ?? null,

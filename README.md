@@ -5,9 +5,9 @@
 > del ecosistema (G4 Carro, G5 Pedidos, G9 Notificaciones).
 
 Mock **funcional** del [contrato REST](docs/openapi.yaml) construido con
-**Node.js + Express**. Emite **JWT reales** y mantiene el estado en memoria, así
-que corre al instante sin base de datos. Está **listo para conectar Supabase**
-(Auth + tabla `public.profiles`) sin cambiar el contrato de salida.
+**Node.js + Express + TypeScript**. Emite **JWT reales** y mantiene el estado en
+memoria, así que corre al instante sin base de datos. Está **listo para conectar
+Supabase** (Auth + tabla `public.profiles`) sin cambiar el contrato de salida.
 
 - **Backend de auth (objetivo):** Supabase Auth (JWT access + refresh token).
 - **Persistencia de perfil/roles (objetivo):** PostgreSQL (Supabase), `public.profiles`.
@@ -21,8 +21,17 @@ Requisitos: Node.js ≥ 18.
 
 ```bash
 npm install
-npm start          # o: npm run dev  (auto-reload)
+npm start          # corre el TypeScript directo con tsx
 ```
+
+Scripts disponibles:
+
+| Script            | Qué hace                                              |
+|-------------------|-------------------------------------------------------|
+| `npm start`       | Levanta el servidor (`tsx src/server.ts`)             |
+| `npm run dev`     | Igual, con auto-reload al guardar (`tsx watch`)       |
+| `npm run typecheck` | Verifica tipos sin ejecutar (`tsc --noEmit`)        |
+| `npm run build`   | Compila a JavaScript en `dist/` (`tsc`)               |
 
 El servidor queda en `http://localhost:8080`.
 Health check: `GET http://localhost:8080/health`.
@@ -187,8 +196,8 @@ ni el contrato de salida**:
    SUPABASE_ANON_KEY=<anon-key>
    SUPABASE_SERVICE_ROLE_KEY=<service-role-key>
    ```
-3. Instala el SDK (`npm install @supabase/supabase-js`) y, en `src/auth.js` /
-   `src/users.js`, cambia las llamadas a `store.js` por llamadas a Supabase
+3. Instala el SDK (`npm install @supabase/supabase-js`) y, en `src/auth.ts` /
+   `src/users.ts`, cambia las llamadas a `store.ts` por llamadas a Supabase
    (`supabase.auth.signInWithPassword`, `supabase.auth.getUser`, consultas a
    `profiles`, etc.). Los handlers siguen devolviendo el mismo JSON.
 
@@ -214,12 +223,14 @@ ni el contrato de salida**:
 ## 11. Estructura del proyecto
 
 ```
+tsconfig.json     # configuración de TypeScript
 src/
-├── server.js     # configura Express (cors, json, rutas) y arranca el servidor
-├── store.js      # "base de datos" en memoria: usuarios, sesiones, seed
-├── helpers.js    # config, errores del contrato, JWT y middlewares de auth
-├── auth.js       # rutas /auth/* (register, login, validate, ...)
-└── users.js      # rutas /users/* (perfil propio + administración)
+├── server.ts     # configura Express (cors, json, rutas) y arranca el servidor
+├── store.ts      # "base de datos" en memoria: usuarios, sesiones, seed (con tipos)
+├── helpers.ts    # config, errores del contrato, JWT y middlewares de auth
+├── types.ts      # extiende Express.Request (req.usuario, req.token...)
+├── auth.ts       # rutas /auth/* (register, login, validate, ...)
+└── users.ts      # rutas /users/* (perfil propio + administración)
 docs/
 ├── openapi.yaml          # contrato REST (fuente de verdad)
 ├── data-model.md         # modelo de datos (diagrama + tablas)
@@ -227,10 +238,11 @@ docs/
 postman/                  # colección + environment
 ```
 
-> **Cómo está organizado (para explicarlo):** `server.js` enchufa los dos
-> routers; cada router (`auth.js`, `users.js`) tiene un handler por endpoint que
-> valida con `if`, usa `store.js` para leer/escribir datos y responde con el JSON
-> del contrato. `helpers.js` concentra lo común (tokens, errores, middlewares).
+> **Cómo está organizado (para explicarlo):** `server.ts` enchufa los dos
+> routers; cada router (`auth.ts`, `users.ts`) tiene un handler por endpoint que
+> valida con `if`, usa `store.ts` para leer/escribir datos y responde con el JSON
+> del contrato. `helpers.ts` concentra lo común (tokens, errores, middlewares) y
+> `store.ts` define la interfaz `Usuario` con sus tipos.
 
 ---
 
