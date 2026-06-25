@@ -1,0 +1,1284 @@
+openapi: 3.0.3
+
+info:
+  title: Identity Service API
+  description: |
+    Contrato REST del servicio de **Identidad, Usuarios y Sesiones** (Grupo 2).
+
+    Responsable del dominio: registro, login, sesión/token, roles y validación de
+    identidad para el resto del ecosistema.
+
+    Backend de autenticación: **Supabase Auth** (emite JWT access token + refresh token).
+    Persistencia de perfil y roles: **PostgreSQL (Supabase)**, tabla `public.profiles`.
+
+    ## Convención de nombres
+    Todos los campos que viajan en JSON (body, query, path) usan **snake_case**,
+    consistente con las columnas de PostgreSQL/Supabase. Los identificadores propios
+    de OpenAPI conservan su convención estándar: `operationId` en camelCase y los
+    nombres de esquema en PascalCase (estas NO son variables de datos).
+
+    ## Identificadores de usuario (mapeo con el resto del ecosistema)
+    Existen **dos** identificadores para una misma persona, con relación **1:1**:
+
+      - `user_id` — **UUID** nativo de Supabase Auth (tabla `auth.users`). Es la
+        identidad interna y viaja en el claim `sub` del JWT.
+      - `business_user_id` — identificador de **negocio** legible (ej. `"USR-01"`)
+        que usan G4 (Carro), G5 (Pedidos) y G9 (Notificaciones) para referirse al
+        usuario.
+
+    **G2 es el dueño y responsable de mantener este mapeo 1:1.** Para que cualquier
+    servicio pueda cruzar el JWT contra datos de G4/G5/G9, G2 expone `business_user_id`
+    tanto en el perfil (`UserProfile`) como en la respuesta de `GET /auth/validate`.
+
+    ## Trazabilidad (headers estándar del ecosistema)
+    Todas las operaciones aceptan los headers de trazabilidad comunes del ecosistema,
+    **opcionales** por ahora pero recomendados para depuración end-to-end:
+
+      - `X-Request-Id` — identifica una solicitud puntual.
+      - `X-Correlation-Id` — agrupa todas las solicitudes de un mismo flujo de negocio
+        entre varios servicios; se refleja en el campo `correlationId` de los errores.
+      - `X-Consumer` — servicio que origina la llamada (útil en `/auth/validate`).
+
+    `Idempotency-Key` no aplica a este servicio (las operaciones de Auth no son
+    reintentos idempotentes de escritura de negocio).
+
+    ## Convención de errores
+    Formato **unificado del ecosistema**: `{ timestamp, status, code, message, correlationId }`
+    (ver esquema `Error`). Códigos HTTP usados:
+
+      - 400 Bad Request: payload inválido.
+      - 401 Unauthorized: token ausente, inválido o expirado / credenciales incorrectas.
+      - 403 Forbidden: token válido pero rol/estado no autoriza la acción.
+      - 404 Not Found: recurso inexistente.
+      - 409 Conflict: email ya registrado.
+      - 422 Unprocessable Entity: contraseña no cumple política mínima.
+      - 429 Too Many Requests: límite de tasa excedido (anti fuerza bruta).
+      - 500 Internal Server Error: fallo no controlado.
+
+  version: "1.2.0"
+  contact:
+    name: Grupo 2 — Identidad, Usuarios y Sesiones
+
+servers:
+  - url: https://prueba.minimarketplace.cl
+    description: Producción
+  - url: http://localhost:8080
+    description: Entorno local
+
+tags:
+  - name: Auth
+    description: Registro, login, sesión y validación de tokens.
+  - name: Users
+    description: Perfil y gestión de usuarios/roles.
+
+paths:
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Registrar un nuevo usuario
+      description: |
+        Crea una credencial en Supabase Auth y su perfil asociado en `profiles`
+        con rol por defecto `customer` y estado `active`. Publica (si aplica) el
+        evento `UserRegistered`.
+
+        El usuario queda autenticado de inmediato (se devuelven tokens). El campo
+        `email_verified` refleja si el correo ya fue confirmado; si el proyecto
+        exige confirmación previa, el cliente puede condicionar el acceso a ese flag.
+      operationId: registerUser
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/XCorrelationId'
+        - $ref: '#/components/parameters/XConsumer'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+            example:
+              email: usuario@correo.cl
+              password: "MiClave123"
+              full_name: "Juan Pérez"
+      responses:
+        '201':
+          description: Usuario creado correctamente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+              example:
+                user:
+                  user_id: "3d9a1f44-1b2a-4c3d-8e5f-aabbccddeeff"
+                  business_user_id: "USR-01"
+                  email: usuario@correo.cl
+                  full_name: "Juan Pérez"
+                  role: customer
+                  status: active
+                  email_verified: false
+                  created_at: "2026-06-17T12:00:00Z"
+                  updated_at: "2026-06-17T12:00:00Z"
+                access_token: "eyJhbGciOiJIUzI1NiIsInR5cCI6..."
+                refresh_token: "v1.Md90fka..."
+                token_type: bearer
+                expires_in: 3600
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Iniciar sesión
+      description: |
+        Valida credenciales contra Supabase Auth y devuelve un access token (JWT)
+        de vida corta más un refresh token.
+      operationId: loginUser
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/XCorrelationId'
+        - $ref: '#/components/parameters/XConsumer'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            example:
+              email: usuario@correo.cl
+              password: "MiClave123"
+      responses:
+        '200':
+          description: Login exitoso.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+              example:
+                user:
+                  user_id: "3d9a1f44-1b2a-4c3d-8e5f-aabbccddeeff"
+                  business_user_id: "USR-01"
+                  email: usuario@correo.cl
+                  full_name: "Juan Pérez"
+                  role: customer
+                  status: active
+                  email_verified: true
+                  created_at: "2026-06-01T09:30:00Z"
+                  updated_at: "2026-06-10T18:45:00Z"
+                access_token: "eyJhbGciOiJIUzI1NiIsInR5cCI6..."
+                refresh_token: "v1.Md90fka..."
+                token_type: bearer
+                expires_in: 3600
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Refrescar el access token
+      description: |
+        Entrega un nuevo access token usando un refresh token válido,
+        sin necesidad de volver a ingresar credenciales.
+      operationId: refreshToken
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/XCorrelationId'
+        - $ref: '#/components/parameters/XConsumer'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+            example:
+              refresh_token: "v1.Md90fka..."
+      responses:
+        '200':
+          description: Token renovado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+              example:
+                access_token: "eyJhbGciOiJIUzI1NiIsInR5cCI6...nuevo"
+                refresh_token: "v1.NewRefresh..."
+                token_type: bearer
+                expires_in: 3600
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /auth/change-password:
+    post:
+      tags: [Auth]
+      summary: Cambiar la contraseña (sesión autenticada)
+      description: |
+        Permite a un usuario autenticado cambiar su contraseña entregando la
+        actual y la nueva. No usa el flujo de correo. Tras el cambio, las demás
+        sesiones pueden invalidarse.
+      operationId: changePassword
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/XCorrelationId'
+        - $ref: '#/components/parameters/XConsumer'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangePasswordRequest'
+            example:
+              current_password: "MiClave123"
+              new_password: "MiNuevaClave123"
+      responses:
+        '200':
+          description: Contraseña actualizada correctamente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: "Contraseña actualizada correctamente."
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          description: Token inválido/expirado o la contraseña actual es incorrecta.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                timestamp: "2026-06-17T12:00:00Z"
+                status: 401
+                code: INVALID_CREDENTIALS
+                message: "La contraseña actual es incorrecta."
+                correlationId: "b1d4e8a0-3f2c-4a1b-9c8d-1a2b3c4d5e6f"
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /auth/forgot-password:
+    post:
+      tags: [Auth]
+      summary: Solicitar recuperación de contraseña
+      description: |
+        Inicia el flujo de recuperación. Supabase Auth envía un correo con un enlace
+        que contiene un token de recuperación temporal.
+
+        Por seguridad, la respuesta es **siempre 200 aunque el email no exista**
+        (no se revela si un correo está o no registrado).
+      operationId: forgotPassword
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/XCorrelationId'
+        - $ref: '#/components/parameters/XConsumer'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ForgotPasswordRequest'
+            example:
+              email: usuario@correo.cl
+      responses:
+        '200':
+          description: Si el email existe, se envió un correo con instrucciones.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: "Si el email está registrado, recibirás un correo con instrucciones."
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /auth/reset-password:
+    post:
+      tags: [Auth]
+      summary: Confirmar nueva contraseña con token de recuperación
+      description: |
+        Completa el flujo de recuperación. Recibe el token de recuperación (enviado
+        por correo en el paso anterior) y la nueva contraseña, y la actualiza en
+        Supabase Auth. Tras esto, las sesiones previas pueden invalidarse.
+      operationId: resetPassword
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/XCorrelationId'
+        - $ref: '#/components/parameters/XConsumer'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResetPasswordRequest'
+            example:
+              reset_token: "rt_9f1c2e44aabbccddeeff"
+              new_password: "MiNuevaClave123"
+      responses:
+        '200':
+          description: Contraseña actualizada correctamente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: "Contraseña actualizada correctamente."
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          description: Token de recuperación inválido o expirado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                timestamp: "2026-06-17T12:00:00Z"
+                status: 401
+                code: INVALID_RESET_TOKEN
+                message: "El token de recuperación es inválido o expiró."
+                correlationId: "b1d4e8a0-3f2c-4a1b-9c8d-1a2b3c4d5e6f"
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Cerrar sesión
+      description: |
+        Revoca el refresh token de la sesión, invalidándola. Si se entrega
+        `refresh_token` en el body, revoca esa sesión específica; si se omite,
+        revoca la sesión asociada al access token presentado.
+      operationId: logoutUser
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/XCorrelationId'
+        - $ref: '#/components/parameters/XConsumer'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LogoutRequest'
+            example:
+              refresh_token: "v1.Md90fka..."
+      responses:
+        '204':
+          description: Sesión cerrada correctamente. Sin contenido.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /auth/validate:
+    get:
+      tags: [Auth]
+      summary: Validar sesión (uso interno para otros servicios)
+      description: |
+        Endpoint clave para la integración. Otros grupos (G5 Pedidos, etc.) envían
+        el token del usuario y reciben su identidad y rol vigentes.
+
+        - Token válido y cuenta `active` → 200 con identidad.
+        - Token ausente/inválido/expirado → 401.
+        - Token válido pero cuenta `disabled` → 403.
+
+        Devuelve `business_user_id` (`"USR-01"`) junto al `user_id` (UUID) para que
+        el servicio consumidor pueda cruzar el token con sus propios datos sin
+        mantener un mapeo aparte.
+
+        Resuelve el **caso crítico del E1**: expiración y validación de sesión.
+      operationId: validateSession
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/XCorrelationId'
+        - $ref: '#/components/parameters/XConsumer'
+      responses:
+        '200':
+          description: Token válido. Devuelve identidad y rol.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidateResponse'
+              example:
+                valid: true
+                user_id: "3d9a1f44-1b2a-4c3d-8e5f-aabbccddeeff"
+                business_user_id: "USR-01"
+                email: usuario@correo.cl
+                role: customer
+                status: active
+                expires_at: "2026-06-17T13:00:00Z"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /users/me:
+    get:
+      tags: [Users]
+      summary: Obtener el perfil del usuario autenticado
+      operationId: getMyProfile
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/XCorrelationId'
+        - $ref: '#/components/parameters/XConsumer'
+      responses:
+        '200':
+          description: Perfil del usuario.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+              example:
+                user_id: "3d9a1f44-1b2a-4c3d-8e5f-aabbccddeeff"
+                business_user_id: "USR-01"
+                email: usuario@correo.cl
+                full_name: "Juan Pérez"
+                role: customer
+                status: active
+                email_verified: true
+                created_at: "2026-06-01T09:30:00Z"
+                updated_at: "2026-06-10T18:45:00Z"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    patch:
+      tags: [Users]
+      summary: Actualizar el perfil propio
+      description: Permite al usuario actualizar campos editables de su perfil (ej. nombre).
+      operationId: updateMyProfile
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/XCorrelationId'
+        - $ref: '#/components/parameters/XConsumer'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProfileRequest'
+            example:
+              full_name: "Juan A. Pérez"
+      responses:
+        '200':
+          description: Perfil actualizado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+              example:
+                user_id: "3d9a1f44-1b2a-4c3d-8e5f-aabbccddeeff"
+                business_user_id: "USR-01"
+                email: usuario@correo.cl
+                full_name: "Juan A. Pérez"
+                role: customer
+                status: active
+                email_verified: true
+                created_at: "2026-06-01T09:30:00Z"
+                updated_at: "2026-06-17T12:30:00Z"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /users:
+    get:
+      tags: [Users]
+      summary: Listar usuarios (solo admin)
+      description: |
+        Retorna una lista paginada de todos los usuarios registrados.
+        Restringida a usuarios con rol `admin`.
+      operationId: listUsers
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/XCorrelationId'
+        - $ref: '#/components/parameters/XConsumer'
+        - name: role
+          in: query
+          required: false
+          description: Filtrar por rol.
+          schema:
+            $ref: '#/components/schemas/Role'
+        - name: status
+          in: query
+          required: false
+          description: Filtrar por estado de cuenta.
+          schema:
+            $ref: '#/components/schemas/Status'
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+            example: 1
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+            example: 20
+      responses:
+        '200':
+          description: Lista paginada de usuarios.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserListResponse'
+              example:
+                total: 45
+                page: 1
+                limit: 20
+                users:
+                  - user_id: "3d9a1f44-1b2a-4c3d-8e5f-aabbccddeeff"
+                    business_user_id: "USR-01"
+                    email: juan@correo.cl
+                    full_name: "Juan Pérez"
+                    role: customer
+                    status: active
+                    email_verified: true
+                    created_at: "2026-06-01T09:30:00Z"
+                    updated_at: "2026-06-10T18:45:00Z"
+                  - user_id: "7a2b3c4d-5e6f-7890-abcd-ef1234567890"
+                    business_user_id: "USR-02"
+                    email: maria@correo.cl
+                    full_name: "María González"
+                    role: admin
+                    status: active
+                    email_verified: true
+                    created_at: "2026-05-20T08:00:00Z"
+                    updated_at: "2026-06-05T11:15:00Z"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /users/{user_id}:
+    get:
+      tags: [Users]
+      summary: Obtener perfil de un usuario por ID (solo admin)
+      description: |
+        Retorna el perfil completo de cualquier usuario a partir de su UUID.
+        Restringida a usuarios con rol `admin`.
+      operationId: getUserById
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/XCorrelationId'
+        - $ref: '#/components/parameters/XConsumer'
+        - name: user_id
+          in: path
+          required: true
+          description: UUID del usuario a consultar.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Perfil del usuario.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+              example:
+                user_id: "3d9a1f44-1b2a-4c3d-8e5f-aabbccddeeff"
+                business_user_id: "USR-01"
+                email: juan@correo.cl
+                full_name: "Juan Pérez"
+                role: customer
+                status: active
+                email_verified: true
+                created_at: "2026-06-01T09:30:00Z"
+                updated_at: "2026-06-10T18:45:00Z"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    patch:
+      tags: [Users]
+      summary: Actualizar perfil de un usuario por ID (solo admin)
+      description: |
+        Permite a un administrador actualizar campos editables del perfil de
+        cualquier usuario (ej. nombre). El rol se cambia en
+        `PATCH /users/{user_id}/role` y el estado en `PATCH /users/{user_id}/status`.
+        Para que un usuario actualice su propio perfil, usar `PATCH /users/me`.
+      operationId: updateUserById
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/XCorrelationId'
+        - $ref: '#/components/parameters/XConsumer'
+        - name: user_id
+          in: path
+          required: true
+          description: UUID del usuario a actualizar.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProfileRequest'
+            example:
+              full_name: "Juan A. Pérez"
+      responses:
+        '200':
+          description: Perfil actualizado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+              example:
+                user_id: "3d9a1f44-1b2a-4c3d-8e5f-aabbccddeeff"
+                business_user_id: "USR-01"
+                email: juan@correo.cl
+                full_name: "Juan A. Pérez"
+                role: customer
+                status: active
+                email_verified: true
+                created_at: "2026-06-01T09:30:00Z"
+                updated_at: "2026-06-17T12:30:00Z"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    delete:
+      tags: [Users]
+      summary: Eliminar un usuario por ID (solo admin)
+      description: |
+        Elimina de forma **permanente** la cuenta de un usuario (hard delete).
+        Para desactivar de forma reversible, usar `PATCH /users/{user_id}/status`.
+        Restringida a usuarios con rol `admin`. Publica (si aplica) el evento `UserDeleted`.
+      operationId: deleteUserById
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/XCorrelationId'
+        - $ref: '#/components/parameters/XConsumer'
+        - name: user_id
+          in: path
+          required: true
+          description: UUID del usuario a eliminar.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Usuario eliminado correctamente. Sin contenido.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /users/{user_id}/role:
+    patch:
+      tags: [Users]
+      summary: Cambiar el rol de un usuario (solo admin)
+      description: |
+        Operación restringida a usuarios con rol `admin`. Cambia el rol de la
+        cuenta indicada. Publica (si aplica) el evento `UserRoleChanged`.
+      operationId: changeUserRole
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/XCorrelationId'
+        - $ref: '#/components/parameters/XConsumer'
+        - name: user_id
+          in: path
+          required: true
+          description: UUID del usuario a modificar.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangeRoleRequest'
+            example:
+              role: admin
+      responses:
+        '200':
+          description: Rol actualizado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+              example:
+                user_id: "3d9a1f44-1b2a-4c3d-8e5f-aabbccddeeff"
+                business_user_id: "USR-01"
+                email: usuario@correo.cl
+                full_name: "Juan Pérez"
+                role: admin
+                status: active
+                email_verified: true
+                created_at: "2026-06-01T09:30:00Z"
+                updated_at: "2026-06-17T12:45:00Z"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /users/{user_id}/status:
+    patch:
+      tags: [Users]
+      summary: Activar o deshabilitar un usuario (solo admin)
+      description: |
+        Cambia el estado de la cuenta entre `active` y `disabled`. Una cuenta
+        `disabled` no puede autenticarse y `/auth/validate` responde 403 para
+        sus tokens vigentes. Publica (si aplica) el evento `UserStatusChanged`.
+      operationId: changeUserStatus
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/XCorrelationId'
+        - $ref: '#/components/parameters/XConsumer'
+        - name: user_id
+          in: path
+          required: true
+          description: UUID del usuario a modificar.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangeStatusRequest'
+            example:
+              status: disabled
+      responses:
+        '200':
+          description: Estado actualizado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+              example:
+                user_id: "3d9a1f44-1b2a-4c3d-8e5f-aabbccddeeff"
+                business_user_id: "USR-01"
+                email: usuario@correo.cl
+                full_name: "Juan Pérez"
+                role: customer
+                status: disabled
+                email_verified: true
+                created_at: "2026-06-01T09:30:00Z"
+                updated_at: "2026-06-17T12:50:00Z"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+components:
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: "Access token (JWT) emitido por Supabase Auth en el header Authorization: Bearer <token>."
+
+  parameters:
+
+    XRequestId:
+      name: X-Request-Id
+      in: header
+      required: false
+      description: |
+        Identificador único de esta solicitud puntual (se recomienda UUID), generado
+        por el cliente o el primer gateway. Sirve para trazabilidad end-to-end. Si no
+        se envía, el servicio genera uno y lo devuelve en el header `X-Request-Id` de
+        la respuesta. Opcional por ahora (mínimo común del ecosistema).
+      schema:
+        type: string
+        example: "8f1d6c2a-3b4e-4f5a-9c1d-2e3f4a5b6c7d"
+
+    XCorrelationId:
+      name: X-Correlation-Id
+      in: header
+      required: false
+      description: |
+        Identificador de correlación que agrupa todas las solicitudes de un mismo
+        flujo de negocio a través de varios servicios. Se propaga sin cambios entre
+        servicios y se refleja en el campo `correlationId` de los errores. Si no se
+        envía, el servicio lo deriva del `X-Request-Id`. Opcional por ahora.
+      schema:
+        type: string
+        example: "b1d4e8a0-3f2c-4a1b-9c8d-1a2b3c4d5e6f"
+
+    XConsumer:
+      name: X-Consumer
+      in: header
+      required: false
+      description: |
+        Nombre del servicio que origina la llamada (ej. `order-service`). Útil
+        especialmente en `/auth/validate`, donde otros grupos validan tokens.
+        Opcional; se recomienda enviarlo para auditoría.
+      schema:
+        type: string
+        example: order-service
+
+  schemas:
+
+    RegisterRequest:
+      type: object
+      required: [email, password, full_name]
+      properties:
+        email:
+          type: string
+          format: email
+          example: usuario@correo.cl
+        password:
+          type: string
+          format: password
+          minLength: 8
+          description: Mínimo 8 caracteres.
+          example: "MiClave123"
+        full_name:
+          type: string
+          minLength: 1
+          example: "Juan Pérez"
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+
+    RefreshRequest:
+      type: object
+      required: [refresh_token]
+      properties:
+        refresh_token:
+          type: string
+
+    ChangePasswordRequest:
+      type: object
+      required: [current_password, new_password]
+      properties:
+        current_password:
+          type: string
+          format: password
+        new_password:
+          type: string
+          format: password
+          minLength: 8
+          description: Nueva contraseña, mínimo 8 caracteres.
+
+    LogoutRequest:
+      type: object
+      properties:
+        refresh_token:
+          type: string
+          description: Opcional. Si se entrega, revoca esa sesión específica.
+
+    ForgotPasswordRequest:
+      type: object
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
+          example: usuario@correo.cl
+
+    ResetPasswordRequest:
+      type: object
+      required: [reset_token, new_password]
+      properties:
+        reset_token:
+          type: string
+          description: Token de recuperación recibido por correo.
+        new_password:
+          type: string
+          format: password
+          minLength: 8
+          description: Nueva contraseña, mínimo 8 caracteres.
+
+    MessageResponse:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+
+    UpdateProfileRequest:
+      type: object
+      properties:
+        full_name:
+          type: string
+          minLength: 1
+
+    ChangeRoleRequest:
+      type: object
+      required: [role]
+      properties:
+        role:
+          $ref: '#/components/schemas/Role'
+
+    ChangeStatusRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          $ref: '#/components/schemas/Status'
+
+    Role:
+      type: string
+      enum: [customer, admin]
+      description: Rol del usuario dentro del marketplace.
+
+    Status:
+      type: string
+      enum: [active, disabled]
+      description: Estado de la cuenta.
+
+    UserProfile:
+      type: object
+      properties:
+        user_id:
+          type: string
+          format: uuid
+          description: |
+            Identificador interno y nativo de Supabase Auth (tabla `auth.users`).
+            Es la clave de identidad emitida en el claim `sub` del JWT.
+        business_user_id:
+          type: string
+          nullable: true
+          description: |
+            Identificador de negocio legible (ej. "USR-01") usado por el resto del
+            ecosistema (G4 Carro, G5 Pedidos, G9 Notificaciones) para referirse al
+            usuario. G2 mantiene la relación 1:1 con `user_id`. Puede ser null si la
+            cuenta aún no tiene uno asignado.
+          example: "USR-01"
+        email:
+          type: string
+          format: email
+        full_name:
+          type: string
+        role:
+          $ref: '#/components/schemas/Role'
+        status:
+          $ref: '#/components/schemas/Status'
+        email_verified:
+          type: boolean
+          description: Indica si el correo fue confirmado en Supabase Auth.
+          example: true
+        created_at:
+          type: string
+          format: date-time
+          description: Fecha de creación de la cuenta.
+        updated_at:
+          type: string
+          format: date-time
+          description: Última modificación del perfil.
+
+    TokenResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+          description: JWT de vida corta.
+        refresh_token:
+          type: string
+        token_type:
+          type: string
+          example: bearer
+        expires_in:
+          type: integer
+          description: Segundos de validez del access token.
+          example: 3600
+
+    AuthResponse:
+      type: object
+      properties:
+        user:
+          $ref: '#/components/schemas/UserProfile'
+        access_token:
+          type: string
+        refresh_token:
+          type: string
+        token_type:
+          type: string
+          example: bearer
+        expires_in:
+          type: integer
+          example: 3600
+
+    UserListResponse:
+      type: object
+      properties:
+        total:
+          type: integer
+          description: Total de usuarios que coinciden con los filtros.
+          example: 45
+        page:
+          type: integer
+          example: 1
+        limit:
+          type: integer
+          example: 20
+        users:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserProfile'
+
+    ValidateResponse:
+      type: object
+      properties:
+        valid:
+          type: boolean
+          example: true
+        user_id:
+          type: string
+          format: uuid
+          description: UUID interno de Supabase Auth (claim `sub` del JWT).
+        business_user_id:
+          type: string
+          nullable: true
+          description: |
+            Identificador de negocio ("USR-01") mapeado 1:1 con `user_id`. Permite a
+            otros servicios cruzar el token con sus propios datos sin mantener un
+            mapeo aparte. Puede ser null si la cuenta aún no tiene uno asignado.
+          example: "USR-01"
+        email:
+          type: string
+          format: email
+        role:
+          $ref: '#/components/schemas/Role'
+        status:
+          $ref: '#/components/schemas/Status'
+        expires_at:
+          type: string
+          format: date-time
+          description: Momento de expiración del token.
+
+    Error:
+      type: object
+      required: [timestamp, status, code, message]
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+          description: Momento en que se generó el error (ISO 8601, UTC).
+          example: "2026-06-17T12:00:00Z"
+        status:
+          type: integer
+          description: Código de estado HTTP de la respuesta.
+          example: 400
+        code:
+          type: string
+          description: Código interno legible y estable para el cliente.
+          example: BAD_REQUEST
+        message:
+          type: string
+          description: Descripción legible del error.
+          example: "El campo 'email' no tiene un formato válido."
+        correlationId:
+          type: string
+          nullable: true
+          description: |
+            Eco del header `X-Correlation-Id` para correlacionar el error con el
+            flujo que lo originó. Puede ser null si la solicitud no aportó uno.
+          example: "b1d4e8a0-3f2c-4a1b-9c8d-1a2b3c4d5e6f"
+
+  responses:
+
+    BadRequest:
+      description: Payload inválido o malformado.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            timestamp: "2026-06-17T12:00:00Z"
+            status: 400
+            code: BAD_REQUEST
+            message: "El campo 'email' no tiene un formato válido."
+            correlationId: "b1d4e8a0-3f2c-4a1b-9c8d-1a2b3c4d5e6f"
+
+    Unauthorized:
+      description: Token ausente, inválido o expirado / credenciales incorrectas.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            timestamp: "2026-06-17T12:00:00Z"
+            status: 401
+            code: UNAUTHORIZED
+            message: "Token inválido o expirado."
+            correlationId: "b1d4e8a0-3f2c-4a1b-9c8d-1a2b3c4d5e6f"
+
+    Forbidden:
+      description: Token válido pero el rol o estado no autoriza la acción.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            timestamp: "2026-06-17T12:00:00Z"
+            status: 403
+            code: FORBIDDEN
+            message: "No tienes permisos para realizar esta acción."
+            correlationId: "b1d4e8a0-3f2c-4a1b-9c8d-1a2b3c4d5e6f"
+
+    NotFound:
+      description: Recurso no encontrado.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            timestamp: "2026-06-17T12:00:00Z"
+            status: 404
+            code: NOT_FOUND
+            message: "Usuario no encontrado."
+            correlationId: "b1d4e8a0-3f2c-4a1b-9c8d-1a2b3c4d5e6f"
+
+    Conflict:
+      description: El email ya se encuentra registrado.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            timestamp: "2026-06-17T12:00:00Z"
+            status: 409
+            code: EMAIL_ALREADY_EXISTS
+            message: "El email ya está registrado."
+            correlationId: "b1d4e8a0-3f2c-4a1b-9c8d-1a2b3c4d5e6f"
+
+    Unprocessable:
+      description: La contraseña no cumple la política mínima.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            timestamp: "2026-06-17T12:00:00Z"
+            status: 422
+            code: WEAK_PASSWORD
+            message: "La contraseña debe tener al menos 8 caracteres."
+            correlationId: "b1d4e8a0-3f2c-4a1b-9c8d-1a2b3c4d5e6f"
+
+    TooManyRequests:
+      description: Límite de solicitudes excedido. Reintentar más tarde.
+      headers:
+        Retry-After:
+          description: Segundos a esperar antes de reintentar.
+          schema:
+            type: integer
+            example: 60
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            timestamp: "2026-06-17T12:00:00Z"
+            status: 429
+            code: RATE_LIMITED
+            message: "Demasiadas solicitudes. Intenta nuevamente en unos minutos."
+            correlationId: "b1d4e8a0-3f2c-4a1b-9c8d-1a2b3c4d5e6f"
+
+    InternalError:
+      description: Error interno no controlado.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            timestamp: "2026-06-17T12:00:00Z"
+            status: 500
+            code: INTERNAL_ERROR
+            message: "Ocurrió un error inesperado."
+            correlationId: "b1d4e8a0-3f2c-4a1b-9c8d-1a2b3c4d5e6f"

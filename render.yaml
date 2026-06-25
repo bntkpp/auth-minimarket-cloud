@@ -1,0 +1,18 @@
+# Blueprint de Render para desplegar el mock como Web Service gratuito.
+# En Render: New + -> Blueprint -> conecta este repo. O crea un Web Service
+# manual con Build: `npm install`  y  Start: `npm start`.
+services:
+  - type: web
+    name: identity-service-g2
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET
+        generateValue: true # Render genera un secreto aleatorio
+      - key: ACCESS_TOKEN_TTL
+        value: "3600"
