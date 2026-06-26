@@ -34,7 +34,16 @@ Scripts disponibles:
 | `npm run build`   | Compila a JavaScript en `dist/` (`tsc`)               |
 
 El servidor queda en `http://localhost:8080`.
-Health check: `GET http://localhost:8080/health`.
+
+| Ruta | Para qué |
+|------|----------|
+| `GET /docs` | **Documentación interactiva (Swagger UI)** — probar los endpoints desde el navegador |
+| `GET /openapi.json` · `GET /openapi.yaml` | El contrato OpenAPI crudo (para importarlo o consumirlo) |
+| `GET /health` | Health check (`{"status":"ok"}`) |
+| `GET /` | Redirige a `/docs` |
+
+> La documentación Swagger se genera a partir de [`docs/openapi.yaml`](docs/openapi.yaml)
+> con `swagger-ui-express`, así que siempre refleja el contrato.
 
 > No necesitas `.env` para el modo mock. Si quieres personalizar (puerto, TTL del
 > token, Supabase), copia `.env.example` a `.env`.
