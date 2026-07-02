@@ -5,36 +5,30 @@ import type { Usuario } from './store.js';
 
 const router = Router();
 
-// Todas las rutas de /users requieren sesión activa.
 router.use(autenticar, soloActivos);
 
-// Busca un usuario por el :user_id de la URL o lanza 404.
 async function obtenerUsuario(req: Request): Promise<Usuario> {
   const usuario = await db.buscarPorId(req.params.user_id);
   if (!usuario) throw fallo.notFound('Usuario no encontrado.');
   return usuario;
 }
 
-// --- Perfil propio ----------------------------------------------------------
-
 // GET /users/me
 router.get('/me', (req: Request, res: Response) => {
   res.status(200).json(aPerfil(req.usuario!));
 });
 
-// PATCH /users/me  (por ahora solo full_name es editable)
+// PATCH /users/me
 router.patch('/me', async (req: Request, res: Response) => {
   const { full_name } = req.body ?? {};
   if (full_name !== undefined && (typeof full_name !== 'string' || full_name.trim() === '')) {
     throw fallo.badRequest("'full_name' no puede estar vacío.");
   }
   if (full_name !== undefined) {
-    await db.actualizarUsuario(req.usuario!.user_id, { full_name });
+    await db.actualizarUsuario(req.usuario!.id, { full_name });
   }
   res.status(200).json(aPerfil(req.usuario!));
 });
-
-// --- Administración (solo admin) -------------------------------------------
 
 // GET /users?role=&status=&page=&limit=
 router.get('/', soloAdmin, async (req: Request, res: Response) => {
@@ -68,7 +62,7 @@ router.patch('/:user_id', soloAdmin, async (req: Request, res: Response) => {
     throw fallo.badRequest("'full_name' no puede estar vacío.");
   }
   if (full_name !== undefined) {
-    await db.actualizarUsuario(usuario.user_id, { full_name });
+    await db.actualizarUsuario(usuario.id, { full_name });
   }
   res.status(200).json(aPerfil(usuario));
 });
@@ -87,7 +81,7 @@ router.patch('/:user_id/role', soloAdmin, async (req: Request, res: Response) =>
   if (role !== 'customer' && role !== 'admin') {
     throw fallo.badRequest("'role' debe ser 'customer' o 'admin'.");
   }
-  await db.actualizarUsuario(usuario.user_id, { role });
+  await db.actualizarUsuario(usuario.id, { role });
   res.status(200).json(aPerfil(usuario));
 });
 
@@ -98,8 +92,8 @@ router.patch('/:user_id/status', soloAdmin, async (req: Request, res: Response) 
   if (status !== 'active' && status !== 'disabled') {
     throw fallo.badRequest("'status' debe ser 'active' o 'disabled'.");
   }
-  await db.actualizarUsuario(usuario.user_id, { status });
-  if (status === 'disabled') db.revocarSesiones(usuario.user_id);
+  await db.actualizarUsuario(usuario.id, { status });
+  if (status === 'disabled') db.revocarSesiones(usuario.id);
   res.status(200).json(aPerfil(usuario));
 });
 

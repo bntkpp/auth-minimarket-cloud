@@ -65,7 +65,7 @@ export function manejadorErrores(err: unknown, req: Request, res: Response, _nex
 export function emitirToken(usuario: Usuario): string {
   return jwt.sign(
     {
-      sub: usuario.user_id,
+      sub: usuario.id,
       email: usuario.email,
       role: usuario.role,
       status: usuario.status,
@@ -124,7 +124,7 @@ export interface UserProfile {
 
 export function aPerfil(u: Usuario): UserProfile {
   return {
-    user_id: u.user_id,
+    user_id: u.id,
     business_user_id: u.business_user_id ?? null,
     email: u.email,
     full_name: u.full_name,

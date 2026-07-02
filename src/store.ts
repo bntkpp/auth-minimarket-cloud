@@ -1,56 +1,59 @@
 import crypto from 'node:crypto';
 import { supabase } from './config/supabase.js';
+import type { User } from '@supabase/supabase-js';
 
 export type Role = 'customer' | 'admin';
 export type Status = 'active' | 'disabled';
 
 export interface Usuario {
-  user_id: string;
-  business_user_id: string;
+  id: string;
   email: string;
   full_name: string;
   role: Role;
   status: Status;
+  business_user_id: string;
   email_verified: boolean;
-  password: string;
   created_at: string;
   updated_at: string;
 }
 
-const ahora = (): string => new Date().toISOString();
+// --- Mapeo entre Supabase User y nuestro modelo ----------------------------
+function mapUser(u: User): Usuario {
+  return {
+    id: u.id,
+    email: u.email ?? '',
+    full_name: (u.user_metadata?.full_name as string) ?? '',
+    role: (u.user_metadata?.role as Role) ?? 'customer',
+    status: (u.user_metadata?.status as Status) ?? 'active',
+    business_user_id: (u.user_metadata?.business_user_id as string) ?? '',
+    email_verified: u.email_confirmed_at != null,
+    created_at: u.created_at ?? '',
+    updated_at: u.updated_at ?? '',
+  };
+}
 
-// --- Sesiones en memoria (refresh tokens) -----------------------------------
-const refreshTokens = new Map<string, string>(); // refresh_token -> user_id
-const resetTokens = new Map<string, string>();   // reset_token   -> user_id
+// --- Sesiones en memoria (refresh / reset tokens) ---------------------------
+const refreshTokens = new Map<string, string>();
+const resetTokens = new Map<string, string>();
 
-// --- Usuarios (Supabase) ----------------------------------------------------
+// --- Usuarios (Supabase Auth) -----------------------------------------------
 export async function buscarPorEmail(email: string): Promise<Usuario | null> {
-  const e = String(email || '').toLowerCase();
-  const { data, error } = await supabase
-    .from('users')
-    .select('*')
-    .eq('email', e)
-    .single();
-
+  const { data, error } = await supabase.auth.admin.listUsers();
   if (error || !data) return null;
-  return data as Usuario;
+  const user = data.users.find((u) => u.email?.toLowerCase() === email.toLowerCase());
+  return user ? mapUser(user) : null;
 }
 
 export async function buscarPorId(userId: string): Promise<Usuario | null> {
-  const { data, error } = await supabase
-    .from('users')
-    .select('*')
-    .eq('user_id', userId)
-    .single();
-
-  if (error || !data) return null;
-  return data as Usuario;
+  const { data, error } = await supabase.auth.admin.getUserById(userId);
+  if (error || !data?.user) return null;
+  return mapUser(data.user);
 }
 
 export async function listarUsuarios(): Promise<Usuario[]> {
-  const { data, error } = await supabase.from('users').select('*');
+  const { data, error } = await supabase.auth.admin.listUsers();
   if (error || !data) return [];
-  return data as Usuario[];
+  return data.users.map(mapUser);
 }
 
 export interface NuevoUsuario {
@@ -60,47 +63,63 @@ export interface NuevoUsuario {
 }
 
 export async function crearUsuario({ email, password, full_name }: NuevoUsuario): Promise<Usuario> {
-  const { count } = await supabase.from('users').select('*', { count: 'exact', head: true });
-  const seq = (count ?? 0) + 1;
+  const { count } = await supabase.from('profiles').select('*', { count: 'exact', head: true });
+  // Si no existe tabla profiles, usamos conteo simple
+  let seq = 1;
+  try {
+    const { data: all } = await supabase.auth.admin.listUsers();
+    seq = (all?.users.length ?? 0) + 1;
+  } catch { /* ignora */ }
 
-  const u: Omit<Usuario, 'user_id'> & { user_id?: string } = {
-    user_id: crypto.randomUUID(),
-    business_user_id: `USR-${String(seq).padStart(2, '0')}`,
+  const { data, error } = await supabase.auth.admin.createUser({
     email,
-    full_name,
-    role: 'customer',
-    status: 'active',
-    email_verified: false,
     password,
-    created_at: ahora(),
-    updated_at: ahora(),
-  };
+    email_confirm: true, // para demo local sin verificar correo
+    user_metadata: {
+      full_name,
+      role: 'customer',
+      status: 'active',
+      business_user_id: `USR-${String(seq).padStart(2, '0')}`,
+    },
+  });
 
-  const { data, error } = await supabase.from('users').insert(u).select().single();
-  if (error || !data) {
-    throw new Error(`Error al crear usuario: ${error?.message ?? 'desconocido'}`);
+  if (error || !data?.user) {
+    throw new Error(error?.message ?? 'Error creando usuario en Supabase Auth');
   }
-  return data as Usuario;
+  return mapUser(data.user);
 }
 
 export async function actualizarUsuario(
   userId: string,
-  cambios: Partial<Omit<Usuario, 'user_id' | 'created_at'>>
+  cambios: Partial<Pick<Usuario, 'full_name' | 'role' | 'status'>>
 ): Promise<Usuario | null> {
-  const { data, error } = await supabase
-    .from('users')
-    .update({ ...cambios, updated_at: ahora() })
-    .eq('user_id', userId)
-    .select()
-    .single();
+  const metadata: Record<string, unknown> = {};
+  if (cambios.full_name !== undefined) metadata.full_name = cambios.full_name;
+  if (cambios.role !== undefined) metadata.role = cambios.role;
+  if (cambios.status !== undefined) metadata.status = cambios.status;
 
-  if (error || !data) return null;
-  return data as Usuario;
+  const { data, error } = await supabase.auth.admin.updateUserById(userId, {
+    user_metadata: metadata,
+  });
+  if (error || !data?.user) return null;
+  return mapUser(data.user);
 }
 
 export async function eliminarUsuario(userId: string): Promise<boolean> {
-  const { error } = await supabase.from('users').delete().eq('user_id', userId);
+  const { error } = await supabase.auth.admin.deleteUser(userId);
   return !error;
+}
+
+// --- Login / Password (delegado a Supabase Auth) ---------------------------
+export async function validarCredenciales(email: string, password: string): Promise<Usuario | null> {
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error || !data.user) return null;
+  return mapUser(data.user);
+}
+
+export async function actualizarPasswordAuth(userId: string, newPassword: string): Promise<void> {
+  const { error } = await supabase.auth.admin.updateUserById(userId, { password: newPassword });
+  if (error) throw new Error(error.message);
 }
 
 // --- Sesiones (refresh tokens) ---------------------------------------------
