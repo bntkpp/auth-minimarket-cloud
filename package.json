@@ -10,6 +10,7 @@
   "scripts": {
     "start": "tsx src/server.ts",
     "dev": "tsx watch src/server.ts",
+    "seed": "tsx src/seed.ts",
     "build": "tsc",
     "typecheck": "tsc --noEmit"
   },
