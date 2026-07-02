@@ -227,6 +227,15 @@ ni el contrato de salida**:
 > También funciona en Railway (incluye `Procfile`). Nota: el estado vive en
 > memoria, así que se reinicia con cada redeploy (es un mock).
 
+### CI/CD
+
+El repo incluye un pipeline de GitHub Actions
+([`.github/workflows/ci-cd.yml`](.github/workflows/ci-cd.yml)): cada push a
+`main` verifica el código (typecheck + build), despliega a Render vía Deploy
+Hook solo si la verificación pasa, y ejecuta un smoke test (newman + colección
+Postman) contra la URL pública. Detalles y configuración en
+[docs/ci-cd.md](docs/ci-cd.md).
+
 ---
 
 ## 11. Estructura del proyecto
