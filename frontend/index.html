@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Identity Service — Demo Frontend</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <h1>🛒 Minimarketplace — Demo de Autenticación</h1>
+    <p class="subtitle">Identity Service (Express + Supabase Auth).</p>
+  </header>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <main class="layout">
+    <section class="col">
+
+      <!-- Login / Registro (visible si NO hay sesión) -->
+      <div id="authCard" class="card">
+        <div class="tabs">
+          <button id="tabLogin" class="tab active">Iniciar sesión</button>
+          <button id="tabRegister" class="tab">Registrarse</button>
+        </div>
+
+        <form id="loginForm" class="form">
+          <label>Email
+            <input type="email" name="email" required />
+          </label>
+          <label>Contraseña
+            <input type="password" name="password" required />
+          </label>
+          <button type="submit">Entrar</button>
+          <button type="button" id="btnForgot" class="link">¿Olvidaste tu contraseña?</button>
+        </form>
+
+        <form id="registerForm" class="form hidden">
+          <label>Nombre completo
+            <input type="text" name="full_name" required />
+          </label>
+          <label>Email
+            <input type="email" name="email" required />
+          </label>
+          <label>Contraseña (mín. 8 caracteres)
+            <input type="password" name="password" minlength="8" required />
+          </label>
+          <button type="submit">Crear cuenta</button>
+        </form>
+
+        <form id="forgotForm" class="form hidden">
+          <p class="hint">Se generará un token de recuperación (visible aquí solo en modo desarrollo).</p>
+          <label>Email
+            <input type="email" name="email" required />
+          </label>
+          <button type="submit">Enviar instrucciones</button>
+          <button type="button" id="btnCancelForgot" class="link">Volver</button>
+        </form>
+
+        <form id="resetForm" class="form hidden">
+          <label>Token de recuperación
+            <input type="text" name="reset_token" required />
+          </label>
+          <label>Nueva contraseña
+            <input type="password" name="new_password" minlength="8" required />
+          </label>
+          <button type="submit">Restablecer contraseña</button>
+          <button type="button" id="btnCancelReset" class="link">Volver</button>
+        </form>
+      </div>
+
+      <!-- Sesión activa (visible si HAY sesión) -->
+      <div id="sessionCard" class="card hidden">
+        <h2>Sesión activa</h2>
+        <div id="profileBox" class="profile"></div>
+
+        <form id="updateNameForm" class="form">
+          <label>Actualizar nombre
+            <input type="text" name="full_name" required />
+          </label>
+          <button type="submit">Guardar</button>
+        </form>
+
+        <form id="changePasswordForm" class="form">
+          <label>Contraseña actual
+            <input type="password" name="current_password" required />
+          </label>
+          <label>Contraseña nueva (mín. 8 caracteres)
+            <input type="password" name="new_password" minlength="8" required />
+          </label>
+          <button type="submit">Cambiar contraseña</button>
+        </form>
+
+        <button id="btnLogout" class="danger">Cerrar sesión</button>
+      </div>
+
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
