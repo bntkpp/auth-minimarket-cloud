@@ -5,7 +5,7 @@
   "type": "module",
   "main": "dist/server.js",
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   },
   "scripts": {
     "start": "tsx src/server.ts",
