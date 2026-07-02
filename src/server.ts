@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import 'express-async-errors';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -68,13 +69,9 @@ app.use(manejadorErrores);
 
 app.listen(config.port, () => {
   console.log('==================================================');
-  console.log('  Identity Service API (G2) - Mock (TypeScript)');
+  console.log('  Identity Service API (G2) - Supabase Edition');
   console.log(`  URL:    http://localhost:${config.port}`);
   console.log(`  Docs:   http://localhost:${config.port}/docs`);
   console.log(`  Health: http://localhost:${config.port}/health`);
-  console.log('--------------------------------------------------');
-  console.log('  Usuarios de prueba:');
-  console.log('   - juan@correo.cl   / MiClave123     (customer)');
-  console.log('   - maria@correo.cl  / AdminClave123  (admin)');
   console.log('==================================================');
 });

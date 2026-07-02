@@ -1,11 +1,5 @@
 import crypto from 'node:crypto';
-
-/**
- * "Base de datos" en memoria del mock. Guarda los usuarios, las sesiones
- * (refresh tokens) y los tokens de recuperación. Al ser un mock, las
- * contraseñas se guardan en texto plano: NO hagas esto en producción
- * (ahí Supabase Auth se encarga del hashing).
- */
+import { supabase } from './config/supabase.js';
 
 export type Role = 'customer' | 'admin';
 export type Status = 'active' | 'disabled';
@@ -25,46 +19,38 @@ export interface Usuario {
 
 const ahora = (): string => new Date().toISOString();
 
-// --- Datos en memoria -------------------------------------------------------
-export const usuarios: Usuario[] = [
-  {
-    user_id: '3d9a1f44-1b2a-4c3d-8e5f-aabbccddeeff',
-    business_user_id: 'USR-01',
-    email: 'juan@correo.cl',
-    full_name: 'Juan Pérez',
-    role: 'customer',
-    status: 'active',
-    email_verified: true,
-    password: 'MiClave123',
-    created_at: '2026-06-01T09:30:00Z',
-    updated_at: '2026-06-10T18:45:00Z',
-  },
-  {
-    user_id: '7a2b3c4d-5e6f-7890-abcd-ef1234567890',
-    business_user_id: 'USR-02',
-    email: 'maria@correo.cl',
-    full_name: 'María González',
-    role: 'admin',
-    status: 'active',
-    email_verified: true,
-    password: 'AdminClave123',
-    created_at: '2026-05-20T08:00:00Z',
-    updated_at: '2026-06-05T11:15:00Z',
-  },
-];
-
+// --- Sesiones en memoria (refresh tokens) -----------------------------------
 const refreshTokens = new Map<string, string>(); // refresh_token -> user_id
 const resetTokens = new Map<string, string>();   // reset_token   -> user_id
-let businessSeq = 2;                              // ya van USR-01 y USR-02
 
-// --- Usuarios ---------------------------------------------------------------
-export function buscarPorEmail(email: string): Usuario | null {
+// --- Usuarios (Supabase) ----------------------------------------------------
+export async function buscarPorEmail(email: string): Promise<Usuario | null> {
   const e = String(email || '').toLowerCase();
-  return usuarios.find((u) => u.email.toLowerCase() === e) ?? null;
+  const { data, error } = await supabase
+    .from('users')
+    .select('*')
+    .eq('email', e)
+    .single();
+
+  if (error || !data) return null;
+  return data as Usuario;
 }
 
-export function buscarPorId(userId: string): Usuario | null {
-  return usuarios.find((u) => u.user_id === userId) ?? null;
+export async function buscarPorId(userId: string): Promise<Usuario | null> {
+  const { data, error } = await supabase
+    .from('users')
+    .select('*')
+    .eq('user_id', userId)
+    .single();
+
+  if (error || !data) return null;
+  return data as Usuario;
+}
+
+export async function listarUsuarios(): Promise<Usuario[]> {
+  const { data, error } = await supabase.from('users').select('*');
+  if (error || !data) return [];
+  return data as Usuario[];
 }
 
 export interface NuevoUsuario {
@@ -73,11 +59,13 @@ export interface NuevoUsuario {
   full_name: string;
 }
 
-export function crearUsuario({ email, password, full_name }: NuevoUsuario): Usuario {
-  businessSeq += 1;
-  const u: Usuario = {
+export async function crearUsuario({ email, password, full_name }: NuevoUsuario): Promise<Usuario> {
+  const { count } = await supabase.from('users').select('*', { count: 'exact', head: true });
+  const seq = (count ?? 0) + 1;
+
+  const u: Omit<Usuario, 'user_id'> & { user_id?: string } = {
     user_id: crypto.randomUUID(),
-    business_user_id: `USR-${String(businessSeq).padStart(2, '0')}`,
+    business_user_id: `USR-${String(seq).padStart(2, '0')}`,
     email,
     full_name,
     role: 'customer',
@@ -87,20 +75,32 @@ export function crearUsuario({ email, password, full_name }: NuevoUsuario): Usua
     created_at: ahora(),
     updated_at: ahora(),
   };
-  usuarios.push(u);
-  return u;
+
+  const { data, error } = await supabase.from('users').insert(u).select().single();
+  if (error || !data) {
+    throw new Error(`Error al crear usuario: ${error?.message ?? 'desconocido'}`);
+  }
+  return data as Usuario;
 }
 
-export function actualizarUsuario(usuario: Usuario, cambios: Partial<Usuario>): Usuario {
-  Object.assign(usuario, cambios, { updated_at: ahora() });
-  return usuario;
+export async function actualizarUsuario(
+  userId: string,
+  cambios: Partial<Omit<Usuario, 'user_id' | 'created_at'>>
+): Promise<Usuario | null> {
+  const { data, error } = await supabase
+    .from('users')
+    .update({ ...cambios, updated_at: ahora() })
+    .eq('user_id', userId)
+    .select()
+    .single();
+
+  if (error || !data) return null;
+  return data as Usuario;
 }
 
-export function eliminarUsuario(userId: string): boolean {
-  const i = usuarios.findIndex((u) => u.user_id === userId);
-  if (i === -1) return false;
-  usuarios.splice(i, 1);
-  return true;
+export async function eliminarUsuario(userId: string): Promise<boolean> {
+  const { error } = await supabase.from('users').delete().eq('user_id', userId);
+  return !error;
 }
 
 // --- Sesiones (refresh tokens) ---------------------------------------------
@@ -113,7 +113,7 @@ export function crearRefreshToken(userId: string): string {
 export function usarRefreshToken(token: string): string | null {
   const userId = refreshTokens.get(token);
   if (!userId) return null;
-  refreshTokens.delete(token); // rotación: el viejo deja de servir
+  refreshTokens.delete(token);
   return userId;
 }
 

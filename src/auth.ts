@@ -17,7 +17,7 @@ function esEmail(v: unknown): v is string {
 }
 
 // Arma la respuesta AuthResponse (user + tokens) del contrato.
-function authResponse(usuario: Usuario) {
+async function authResponse(usuario: Usuario) {
   return {
     user: aPerfil(usuario),
     access_token: emitirToken(usuario),
@@ -28,54 +28,54 @@ function authResponse(usuario: Usuario) {
 }
 
 // POST /auth/register --------------------------------------------------------
-router.post('/register', (req: Request, res: Response) => {
+router.post('/register', async (req: Request, res: Response) => {
   const { email, password, full_name } = req.body ?? {};
   if (!esEmail(email) || !esTexto(full_name) || typeof password !== 'string') {
     throw fallo.badRequest("Faltan campos o 'email' no es válido.");
   }
   if (password.length < 8) throw fallo.weakPassword();
-  if (db.buscarPorEmail(email)) throw fallo.conflict();
+  if (await db.buscarPorEmail(email)) throw fallo.conflict();
 
-  const usuario = db.crearUsuario({ email, password, full_name });
-  res.status(201).json(authResponse(usuario));
+  const usuario = await db.crearUsuario({ email, password, full_name });
+  res.status(201).json(await authResponse(usuario));
 });
 
 // POST /auth/login -----------------------------------------------------------
-router.post('/login', (req: Request, res: Response) => {
+router.post('/login', async (req: Request, res: Response) => {
   const { email, password } = req.body ?? {};
   if (!esEmail(email) || typeof password !== 'string') {
     throw fallo.badRequest('Falta email o password.');
   }
-  const usuario = db.buscarPorEmail(email);
+  const usuario = await db.buscarPorEmail(email);
   if (!usuario || usuario.password !== password) {
     throw fallo.invalidCredentials('Email o contraseña incorrectos.');
   }
   if (usuario.status !== 'active') {
     throw fallo.unauthorized('La cuenta está deshabilitada.');
   }
-  res.status(200).json(authResponse(usuario));
+  res.status(200).json(await authResponse(usuario));
 });
 
 // POST /auth/refresh ---------------------------------------------------------
-router.post('/refresh', (req: Request, res: Response) => {
+router.post('/refresh', async (req: Request, res: Response) => {
   const { refresh_token } = req.body ?? {};
   if (!esTexto(refresh_token)) throw fallo.badRequest('Falta refresh_token.');
 
   const userId = db.usarRefreshToken(refresh_token);
-  const usuario = userId ? db.buscarPorId(userId) : null;
+  const usuario = userId ? await db.buscarPorId(userId) : null;
   if (!usuario || usuario.status !== 'active') {
     throw fallo.unauthorized('Refresh token inválido o expirado.');
   }
   res.status(200).json({
     access_token: emitirToken(usuario),
-    refresh_token: db.crearRefreshToken(usuario.user_id), // rotación
+    refresh_token: db.crearRefreshToken(usuario.user_id),
     token_type: 'bearer',
     expires_in: config.accessTtl,
   });
 });
 
 // POST /auth/change-password (autenticado) ----------------------------------
-router.post('/change-password', autenticar, (req: Request, res: Response) => {
+router.post('/change-password', autenticar, async (req: Request, res: Response) => {
   const usuario = req.usuario!;
   const { current_password, new_password } = req.body ?? {};
   if (typeof current_password !== 'string' || typeof new_password !== 'string') {
@@ -86,21 +86,18 @@ router.post('/change-password', autenticar, (req: Request, res: Response) => {
   }
   if (new_password.length < 8) throw fallo.weakPassword();
 
-  db.actualizarUsuario(usuario, { password: new_password });
-  db.revocarSesiones(usuario.user_id); // invalida las demás sesiones
+  await db.actualizarUsuario(usuario.user_id, { password: new_password });
+  db.revocarSesiones(usuario.user_id);
   res.status(200).json({ message: 'Contraseña actualizada correctamente.' });
 });
 
 // POST /auth/forgot-password -------------------------------------------------
-router.post('/forgot-password', (req: Request, res: Response) => {
+router.post('/forgot-password', async (req: Request, res: Response) => {
   const { email } = req.body ?? {};
   if (!esEmail(email)) throw fallo.badRequest("'email' no es válido.");
 
-  // Por seguridad respondemos 200 aunque el email no exista.
-  const usuario = db.buscarPorEmail(email);
+  const usuario = await db.buscarPorEmail(email);
   if (usuario && !config.isProd) {
-    // El mock no envía correos: dejamos el reset_token en un header (solo fuera
-    // de producción) para poder probar /auth/reset-password.
     const token = db.crearResetToken(usuario.user_id);
     console.log(`[mock] reset_token: ${token}`);
     res.setHeader('X-Mock-Reset-Token', token);
@@ -111,7 +108,7 @@ router.post('/forgot-password', (req: Request, res: Response) => {
 });
 
 // POST /auth/reset-password --------------------------------------------------
-router.post('/reset-password', (req: Request, res: Response) => {
+router.post('/reset-password', async (req: Request, res: Response) => {
   const { reset_token, new_password } = req.body ?? {};
   if (!esTexto(reset_token) || typeof new_password !== 'string') {
     throw fallo.badRequest('Faltan reset_token o new_password.');
@@ -121,8 +118,9 @@ router.post('/reset-password', (req: Request, res: Response) => {
   const userId = db.usarResetToken(reset_token);
   if (!userId) throw fallo.invalidResetToken();
 
-  const usuario = db.buscarPorId(userId)!;
-  db.actualizarUsuario(usuario, { password: new_password });
+  const usuario = await db.buscarPorId(userId);
+  if (!usuario) throw fallo.invalidResetToken();
+  await db.actualizarUsuario(userId, { password: new_password });
   db.revocarSesiones(userId);
   res.status(200).json({ message: 'Contraseña actualizada correctamente.' });
 });
@@ -138,12 +136,10 @@ router.post('/logout', autenticar, (req: Request, res: Response) => {
 // GET /auth/validate (autenticado) — endpoint para otros grupos -------------
 router.get('/validate', autenticar, (req: Request, res: Response) => {
   const usuario = req.usuario!;
-  // El token ya fue verificado (401 si era inválido/expirado).
-  // Cuenta deshabilitada -> 403.
   if (usuario.status !== 'active') throw fallo.forbidden('La cuenta está deshabilitada.');
 
   const decoded = jwt.decode(req.token!) as jwt.JwtPayload;
-  const exp = decoded.exp ?? 0; // epoch en segundos
+  const exp = decoded.exp ?? 0;
   res.status(200).json({
     valid: true,
     user_id: usuario.user_id,

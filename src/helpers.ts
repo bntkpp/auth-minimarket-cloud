@@ -10,9 +10,13 @@ import './types.js'; // carga la extensión de tipos de Express.Request
  */
 
 // --- Configuración (se puede sobreescribir con variables de entorno) --------
+if (!process.env.JWT_SECRET) {
+  throw new Error('Falta la variable de entorno JWT_SECRET');
+}
+
 export const config = {
   port: Number(process.env.PORT) || 8080,
-  jwtSecret: process.env.JWT_SECRET || 'secreto-de-prueba',
+  jwtSecret: process.env.JWT_SECRET,
   // Vida del access token en segundos. Ponlo bajo (ej. 10) para demostrar la
   // expiración del token en /auth/validate.
   accessTtl: Number(process.env.ACCESS_TOKEN_TTL) || 3600,
@@ -74,7 +78,7 @@ export function emitirToken(usuario: Usuario): string {
 
 // --- Middlewares de autenticación ------------------------------------------
 // Verifica el header "Authorization: Bearer <token>" y deja el usuario en req.
-export function autenticar(req: Request, _res: Response, next: NextFunction): void {
+export async function autenticar(req: Request, _res: Response, next: NextFunction): Promise<void> {
   const [scheme, token] = (req.headers.authorization || '').split(' ');
   if (scheme !== 'Bearer' || !token) {
     return next(fallo.unauthorized('Falta el token (Bearer).'));
@@ -86,7 +90,7 @@ export function autenticar(req: Request, _res: Response, next: NextFunction): vo
     const msg = (e as Error).name === 'TokenExpiredError' ? 'El token ha expirado.' : 'Token inválido.';
     return next(fallo.unauthorized(msg));
   }
-  const usuario = buscarPorId(String(datos.sub));
+  const usuario = await buscarPorId(String(datos.sub));
   if (!usuario) return next(fallo.unauthorized('El usuario ya no existe.'));
   req.usuario = usuario;
   req.token = token;
