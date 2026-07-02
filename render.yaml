@@ -9,6 +9,9 @@ services:
     buildCommand: npm install
     startCommand: npm start
     healthCheckPath: /health
+    # El deploy lo dispara GitHub Actions (Deploy Hook) SOLO si el CI pasa.
+    # Por eso desactivamos el auto-deploy nativo de Render.
+    autoDeploy: false
     envVars:
       - key: NODE_ENV
         value: production
@@ -16,3 +19,9 @@ services:
         generateValue: true # Render genera un secreto aleatorio
       - key: ACCESS_TOKEN_TTL
         value: "3600"
+      # sync: false = Render pide el valor a mano en el dashboard (son
+      # secretos de Supabase; nunca deben ir en el repo).
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
