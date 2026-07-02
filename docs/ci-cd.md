@@ -20,10 +20,10 @@ servicio vivo responde según el contrato.
 ## 2. Arquitectura del pipeline
 
 ```
-push a main ──► JOB ci ──────► JOB deploy ─────► JOB smoke
-                typecheck       POST al Deploy    espera /health
-                + build         Hook de Render    + newman (Postman)
-                   │
+push a main ──► JOB ci ──────► JOB deploy ─────► JOB seed ──────► JOB smoke
+                typecheck       POST al Deploy    crea usuarios   espera /health
+                + build         Hook de Render    de prueba en    + newman (Postman)
+                   │                              Supabase
 Pull Request ──────┘  (solo verifica, NO despliega)
 ```
 
@@ -51,17 +51,26 @@ Reglas clave (definidas en [`.github/workflows/ci-cd.yml`](../.github/workflows/
 | Dónde | Nombre | Valor |
 |---|---|---|
 | Secrets and variables → Actions → **Secrets** | `RENDER_DEPLOY_HOOK_URL` | URL del Deploy Hook de Render |
+| Secrets and variables → Actions → **Secrets** | `SUPABASE_URL` | URL del proyecto Supabase (la misma que en Render) |
+| Secrets and variables → Actions → **Secrets** | `SUPABASE_SERVICE_ROLE_KEY` | Service Role Key de Supabase (la misma que en Render) |
 | Secrets and variables → Actions → **Variables** | `SERVICE_URL` | URL pública del servicio, ej. `https://identity-service-g2.onrender.com` (sin `/` final) |
 
-> El hook va en *Secrets* porque quien lo tenga puede disparar deploys; la
-> URL pública va en *Variables* porque no es sensible y así se lee en los
-> logs del pipeline.
+> El hook y las claves de Supabase van en *Secrets* porque son sensibles; la
+> URL pública va en *Variables* porque no lo es y así se lee en los logs del
+> pipeline. `SUPABASE_URL` y `SUPABASE_SERVICE_ROLE_KEY` las necesita el job
+> `seed` para crear los usuarios de prueba directamente en Supabase.
 
-### 3.3 Requisito del smoke test
+### 3.3 Requisito del smoke test (automático vía job `seed`)
 
 La carpeta *Auth* de la colección Postman hace login con los usuarios
 `juan@correo.cl` y `maria@correo.cl`; deben existir en el Supabase de
-producción (registro aleatorio, el resto de casos no dependen de datos).
+producción (el resto de casos usa registro aleatorio y no depende de datos).
+
+El job `seed` los crea/actualiza automáticamente antes del smoke test
+ejecutando `npm run seed` ([`src/seed.ts`](../src/seed.ts)). El script es
+idempotente: si el usuario ya existe, solo reafirma su contraseña, rol y
+metadata, sin duplicar. Para correrlo en local: `npm run seed` (con el `.env`
+apuntando a tu Supabase).
 
 ## 4. Evidencia para la rúbrica
 

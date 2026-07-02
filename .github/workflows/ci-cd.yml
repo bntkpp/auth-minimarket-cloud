@@ -64,14 +64,45 @@ jobs:
         run: curl -sf -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
 
   # --------------------------------------------------------------------------
-  # JOB 3 — Smoke test: verificación post-deploy.
+  # JOB 3 — Seed: usuarios de prueba.
+  # Crea (o actualiza) en Supabase los usuarios fijos que la colección Postman
+  # necesita: juan@correo.cl (customer) y maria@correo.cl (admin). Es
+  # idempotente, así que puede correr en cada push sin duplicar datos. Sin este
+  # paso, el smoke test falla porque esos usuarios no existen.
+  # --------------------------------------------------------------------------
+  seed:
+    name: Seed — usuarios de prueba
+    needs: deploy
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+    steps:
+      - name: Descargar el código del repo
+        uses: actions/checkout@v4
+
+      - name: Instalar Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Instalar dependencias (npm ci)
+        run: npm ci
+
+      - name: Sembrar usuarios semilla
+        run: npm run seed
+
+  # --------------------------------------------------------------------------
+  # JOB 4 — Smoke test: verificación post-deploy.
   # Espera a que el servicio recién desplegado responda en /health y luego
   # ejecuta la carpeta "Auth" de la colección Postman con newman (el runner
   # de Postman para terminal) contra la URL pública.
   # --------------------------------------------------------------------------
   smoke:
     name: Smoke test — API pública
-    needs: deploy
+    needs: seed
     runs-on: ubuntu-latest
     steps:
       - name: Descargar el código del repo
