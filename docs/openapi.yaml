@@ -60,7 +60,7 @@ info:
     name: Grupo 2 — Identidad, Usuarios y Sesiones
 
 servers:
-  - url: https://prueba.minimarketplace.cl
+  - url: https://auth-minimarket-cloud.onrender.com
     description: Producción
   - url: http://localhost:8080
     description: Entorno local
