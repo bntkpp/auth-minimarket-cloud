@@ -1,7 +1,8 @@
 import { Router, type Request, type Response } from 'express';
-import { fallo, soloActivos, soloAdmin, autenticar, aPerfil } from './helpers.js';
-import * as db from './store.js';
-import type { Usuario } from './store.js';
+import { fallo } from '../utils/errors.js';
+import { soloActivos, soloAdmin, autenticar } from '../middleware/auth.js';
+import { aPerfil, type Usuario } from '../models/user.js';
+import * as db from '../repositories/store.js';
 
 const router = Router();
 

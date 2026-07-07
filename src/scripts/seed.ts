@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { supabase } from './config/supabase.js';
+import { supabase } from '../config/supabase.js';
 import type { User } from '@supabase/supabase-js';
 
 /**

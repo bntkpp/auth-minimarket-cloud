@@ -1,4 +1,4 @@
-import type { Usuario } from './store.js';
+import type { Usuario } from '../models/user.js';
 
 /**
  * Extiende el tipo Request de Express para incluir los datos que agregan

@@ -8,9 +8,10 @@ import cors from 'cors';
 import swaggerUi from 'swagger-ui-express';
 import YAML from 'yaml';
 
-import { config, manejadorErrores, fallo } from './helpers.js';
-import authRouter from './auth.js';
-import usersRouter from './users.js';
+import { config } from './config/env.js';
+import { manejadorErrores, fallo } from './utils/errors.js';
+import authRouter from './routes/auth.js';
+import usersRouter from './routes/users.js';
 
 const app = express();
 

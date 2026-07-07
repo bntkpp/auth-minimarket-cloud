@@ -1,10 +1,11 @@
 import { Router, type Request, type Response } from 'express';
 import jwt from 'jsonwebtoken';
-import {
-  config, fallo, emitirToken, autenticar, aPerfil,
-} from './helpers.js';
-import * as db from './store.js';
-import type { Usuario } from './store.js';
+import { config } from '../config/env.js';
+import { fallo } from '../utils/errors.js';
+import { emitirToken } from '../utils/tokens.js';
+import { autenticar } from '../middleware/auth.js';
+import { aPerfil, type Usuario } from '../models/user.js';
+import * as db from '../repositories/store.js';
 
 const router = Router();
 
@@ -146,6 +147,6 @@ router.get('/validate', autenticar, (req: Request, res: Response) => {
     status: usuario.status,
     expires_at: new Date(exp * 1000).toISOString(),
   });
-})
+});
 
 export default router;

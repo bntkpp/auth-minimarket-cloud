@@ -1,21 +1,13 @@
 import crypto from 'node:crypto';
-import { supabase } from './config/supabase.js';
+import { supabase } from '../config/supabase.js';
 import type { User } from '@supabase/supabase-js';
+import type { Usuario, Role, Status } from '../models/user.js';
 
-export type Role = 'customer' | 'admin';
-export type Status = 'active' | 'disabled';
-
-export interface Usuario {
-  id: string;
-  email: string;
-  full_name: string;
-  role: Role;
-  status: Status;
-  business_user_id: string;
-  email_verified: boolean;
-  created_at: string;
-  updated_at: string;
-}
+/**
+ * Acceso a datos: usuarios en Supabase Auth + sesiones (refresh/reset tokens)
+ * en memoria. El resto de la app usa estas funciones sin saber que por debajo
+ * es Supabase.
+ */
 
 // --- Mapeo entre Supabase User y nuestro modelo ----------------------------
 function mapUser(u: User): Usuario {
