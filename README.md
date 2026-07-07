@@ -212,20 +212,22 @@ ni el contrato de salida**:
 
 ---
 
-## 10. Deploy del mock público (Render)
+## 10. Servicio desplegado (Render)
 
-1. Sube este repo a GitHub.
-2. En [Render](https://render.com): **New + → Blueprint** y selecciona el repo
-   (usa [`render.yaml`](render.yaml)). O **New + → Web Service** manual con:
-   - Build: `npm install`
-   - Start: `npm start`
-   - Health check path: `/health`
-3. Render asigna una URL pública (`https://identity-service-g2.onrender.com`).
-   Cámbiala en la variable `base_url` de Postman para que el resto de grupos
-   apunten ahí.
+**URL pública:** `https://auth-minimarket-cloud.onrender.com`
+· Docs: [`/docs`](https://auth-minimarket-cloud.onrender.com/docs)
+· Health: [`/health`](https://auth-minimarket-cloud.onrender.com/health)
 
-> También funciona en Railway (incluye `Procfile`). Nota: el estado vive en
-> memoria, así que se reinicia con cada redeploy (es un mock).
+Para consumirlo desde Postman, cambia la variable `base_url` del environment a
+esa URL. Para la integración con otros grupos (ej. G4 Carrito), ver
+[docs/integracion-g4.md](docs/integracion-g4.md).
+
+Cómo se redespliega (config en [`render.yaml`](render.yaml)): Build `npm install`,
+Start `npm start`, Health check `/health`. Cada push a `main` puede
+redesplegar automáticamente.
+
+> Plan **free**: el servicio se duerme tras inactividad; la primera petición
+> puede tardar ~30-50 s en responder.
 
 ### CI/CD
 
@@ -241,26 +243,39 @@ Postman) contra la URL pública. Detalles y configuración en
 ## 11. Estructura del proyecto
 
 ```
-tsconfig.json     # configuración de TypeScript
+tsconfig.json               # configuración de TypeScript
 src/
-├── server.ts     # configura Express (cors, json, rutas) y arranca el servidor
-├── store.ts      # "base de datos" en memoria: usuarios, sesiones, seed (con tipos)
-├── helpers.ts    # config, errores del contrato, JWT y middlewares de auth
-├── types.ts      # extiende Express.Request (req.usuario, req.token...)
-├── auth.ts       # rutas /auth/* (register, login, validate, ...)
-└── users.ts      # rutas /users/* (perfil propio + administración)
-docs/
-├── openapi.yaml          # contrato REST (fuente de verdad)
-├── data-model.md         # modelo de datos (diagrama + tablas)
-└── supabase-schema.sql   # DDL para Supabase
-postman/                  # colección + environment
+├── server.ts               # arma Express (cors, json, rutas, Swagger) y arranca
+├── config/
+│   ├── env.ts              # configuración (variables de entorno, JWT_SECRET)
+│   └── supabase.ts         # cliente de Supabase (service role)
+├── models/
+│   └── user.ts             # tipo Usuario/Role/Status + aPerfil (UserProfile)
+├── repositories/
+│   └── store.ts            # acceso a datos: Supabase Auth + sesiones en memoria
+├── routes/
+│   ├── auth.ts             # /auth/* (register, login, validate, ...)
+│   └── users.ts            # /users/* (perfil propio + administración)
+├── middleware/
+│   └── auth.ts             # autenticar / soloActivos / soloAdmin
+├── utils/
+│   ├── errors.ts           # ApiError + fallo + manejador de errores del contrato
+│   ├── tokens.ts           # emisión de JWT
+│   └── types.ts            # extiende Express.Request (req.usuario, req.token...)
+└── scripts/
+    ├── seed.ts             # npm run seed  (crea juan/maria de prueba)
+    └── unseed.ts           # npm run unseed
+docs/       # openapi.yaml, data-model.md, supabase-schema.sql, integracion-g4.md
+postman/    # colección + environment
+admin-panel/ # panel de admin (React + Vite) — se despliega aparte en Vercel
 ```
 
-> **Cómo está organizado (para explicarlo):** `server.ts` enchufa los dos
-> routers; cada router (`auth.ts`, `users.ts`) tiene un handler por endpoint que
-> valida con `if`, usa `store.ts` para leer/escribir datos y responde con el JSON
-> del contrato. `helpers.ts` concentra lo común (tokens, errores, middlewares) y
-> `store.ts` define la interfaz `Usuario` con sus tipos.
+> **Cómo está organizado (para explicarlo):** `server.ts` enchufa los routers de
+> `routes/`; cada router valida la entrada y usa `repositories/store.ts` para
+> leer/escribir en Supabase. `middleware/auth.ts` protege las rutas (Bearer +
+> roles), `utils/` concentra errores y tokens, `models/user.ts` define el tipo
+> `Usuario` y `config/` la configuración. El acceso a datos está aislado en
+> `repositories/`, así que se puede cambiar el origen sin tocar las rutas.
 
 ---
 
