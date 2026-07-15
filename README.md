@@ -267,7 +267,9 @@ src/
     └── unseed.ts           # npm run unseed
 docs/       # openapi.yaml, data-model.md, supabase-schema.sql, integracion-g4.md
 postman/    # colección + environment
-admin-panel/ # panel de admin (React + Vite) — se despliega aparte en Vercel
+admin-panel/    # panel de admin (React + Vite) — se despliega aparte en Vercel
+customer-panel/ # portal de clientes (React + Vite): registro, login, recuperar contraseña y cuenta
+frontend/       # demo de autenticación en JS vanilla (para mostrar los flujos sin build)
 ```
 
 > **Cómo está organizado (para explicarlo):** `server.ts` enchufa los routers de
